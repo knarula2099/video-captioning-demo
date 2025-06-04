@@ -28,11 +28,29 @@ if 'selected_models' not in st.session_state:
     st.session_state.selected_models = ["Gemini"]
 if 'custom_prompt' not in st.session_state:
     st.session_state.custom_prompt = None
+if 'models_initialized' not in st.session_state:
+    st.session_state.models_initialized = False
 
 # Get API keys from environment variables
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+# Initialize caption generator with loading indicator
+if not st.session_state.models_initialized:
+    with st.spinner("Initializing AI models (this may take a few moments on first run)..."):
+        caption_generator = CaptionGenerator(
+            google_api_key=GOOGLE_API_KEY,
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            openai_api_key=OPENAI_API_KEY
+        )
+        st.session_state.models_initialized = True
+else:
+    caption_generator = CaptionGenerator(
+        google_api_key=GOOGLE_API_KEY,
+        anthropic_api_key=ANTHROPIC_API_KEY,
+        openai_api_key=OPENAI_API_KEY
+    )
 
 def cleanup_files():
     """Clean up all generated files."""
@@ -267,34 +285,31 @@ def main():
     st.write("Upload a video or provide a YouTube URL to automatically generate captions for all extracted frames")
 
     # Model selection
-    model_options = ["All", "Gemini", "Claude", "GPT-4"]
+    model_options = ["Gemini", "Claude", "GPT-4", "BLIP-Base", "BLIP-Large"]
     
-    selected_model_option = st.selectbox(
-        "Choose AI Model",
+    selected_models = st.multiselect(
+        "Choose AI Models",
         model_options,
-        index=0,  # Default to "All"
-        help="Select which AI model(s) to use for caption generation"
+        default=["Gemini"],  # Default to Gemini
+        help="Select one or more AI models to use for caption generation"
     )
     
-    # Convert selection to list of models for compatibility
-    if selected_model_option == "All":
-        st.session_state.selected_models = ["Gemini", "Claude", "GPT-4"]
-    else:
-        st.session_state.selected_models = [selected_model_option]
+    # Update session state with selected models
+    st.session_state.selected_models = selected_models
     
     # Show selected models
-    if selected_model_option == "All":
-        st.info("Using all available models: Gemini, Claude, and GPT-4")
+    if not selected_models:
+        st.warning("Please select at least one model")
     else:
-        st.info(f"Using: {selected_model_option}")
+        st.info(f"Using: {', '.join(selected_models)}")
         
     # Check for missing API keys and warn user
     missing_keys = []
-    if not GOOGLE_API_KEY and "Gemini" in st.session_state.selected_models:
+    if not GOOGLE_API_KEY and "Gemini" in selected_models:
         missing_keys.append("GOOGLE_API_KEY")
-    if not ANTHROPIC_API_KEY and "Claude" in st.session_state.selected_models:
+    if not ANTHROPIC_API_KEY and "Claude" in selected_models:
         missing_keys.append("ANTHROPIC_API_KEY") 
-    if not OPENAI_API_KEY and "GPT-4" in st.session_state.selected_models:
+    if not OPENAI_API_KEY and "GPT-4" in selected_models:
         missing_keys.append("OPENAI_API_KEY")
         
     if missing_keys:
@@ -338,13 +353,6 @@ def main():
                     # Create progress bar
                     progress_bar = st.progress(0)
                     status_text = st.empty()
-                    
-                    caption_generator = CaptionGenerator(
-                        google_api_key=GOOGLE_API_KEY,
-                        anthropic_api_key=ANTHROPIC_API_KEY,
-                        openai_api_key=OPENAI_API_KEY,
-                        default_prompt=st.session_state.custom_prompt
-                    )
                     
                     captions_list = []
                     total_frames = len(frame_paths)

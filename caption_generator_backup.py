@@ -10,9 +10,6 @@ from google.api_core.exceptions import GoogleAPIError
 from anthropic import Anthropic
 from openai import OpenAI
 import mimetypes
-import torch
-from transformers import BlipProcessor, BlipForConditionalGeneration
-import streamlit as st
 
 # Pricing constants (if you still track cost)
 PRICE_PER_IMAGE = 0.00025
@@ -22,25 +19,6 @@ PRICE_PER_OUTPUT_TOKEN = 0.00000105
 # Retry settings
 MAX_RETRIES = 3
 INITIAL_BACKOFF_SECONDS = 15
-
-@st.cache_resource
-def load_blip_models():
-    """Load and cache BLIP models."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Loading BLIP models on {device}...")
-    
-    models = {
-        "BLIP-Base": {
-            "processor": BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base", use_fast=True),
-            "model": BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base").to(device).eval(),
-        },
-        "BLIP-Large": {
-            "processor": BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", use_fast=True),
-            "model": BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large").to(device).eval(),
-        }
-    }
-    print("BLIP models loaded successfully!")
-    return models, device
 
 class CaptionGenerator:
     def __init__(self, 
@@ -82,9 +60,6 @@ class CaptionGenerator:
             self.openai_client = OpenAI(api_key=openai_api_key)
         else:
             self.openai_client = None
-
-        # Initialize BLIP models using cached loader
-        self.blip_models, self.device = load_blip_models()
 
     def _retry_generate(self, img: PIL_Image.Image, prompt: str) -> Dict:
         retries = 0
@@ -199,34 +174,6 @@ class CaptionGenerator:
         except Exception as e:
             return f"GPT-4 Error: {str(e)}"
 
-    def generate_blip_caption(self, image_path: str, model_name: str = "BLIP-Base") -> str:
-        """Generate caption using BLIP model."""
-        if model_name not in self.blip_models:
-            return f"BLIP model {model_name} not found"
-            
-        try:
-            img = PIL_Image.open(image_path).convert("RGB")
-            cfg = self.blip_models[model_name]
-            
-            prompt = (
-                "Give a succinct 1-sentence description for most cases, and 2 sentences in a minority of cases (target <10%) but only if/when 2 sentences are more optimal for describing the image. "
-                "We don't need flowery descriptions. Whenever possible, give the descriptions in present simple verb tense. "
-                "If the image includes text on the screen, then the description should include the full text, even if it is 2 sentences or more sentences."
-            )
-            
-            inputs = cfg["processor"](images=img, text=prompt, return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                out_ids = cfg["model"].generate(
-                    pixel_values=inputs.pixel_values,
-                    max_length=100,
-                    num_beams=5,
-                    early_stopping=True
-                )
-            caption = cfg["processor"].decode(out_ids[0], skip_special_tokens=True).strip()
-            return caption
-        except Exception as e:
-            return f"BLIP Error: {str(e)}"
-
     def generate_all_captions(self, image_path: str, prompt: Optional[str] = None) -> Dict[str, str]:
         """Generate captions using all available models."""
         captions = {}
@@ -237,9 +184,5 @@ class CaptionGenerator:
             captions["Claude"] = self.generate_claude_caption(image_path, prompt)
         if self.openai_client:
             captions["GPT-4"] = self.generate_gpt4_caption(image_path, prompt)
-            
-        # Add BLIP captions
-        captions["BLIP-Base"] = self.generate_blip_caption(image_path, "BLIP-Base")
-        captions["BLIP-Large"] = self.generate_blip_caption(image_path, "BLIP-Large")
             
         return captions
