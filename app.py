@@ -210,6 +210,7 @@ def export_captions_html():
             
             <div class="summary">
                 <h2>Summary</h2>
+                <p><strong>Prompt Used:</strong> {st.session_state.custom_prompt or "Describe this image in one concise sentence (present simple). Use two sentences only if truly needed (<10% of cases)."}</p>
                 <p><strong>Total Frames:</strong> {len(st.session_state.processed_frames)}</p>
                 <p><strong>Models Used:</strong> {', '.join(set().union(*[caption_dict.keys() for caption_dict in st.session_state.captions]))}</p>
             </div>
