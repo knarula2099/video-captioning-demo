@@ -10,9 +10,20 @@ from google.api_core.exceptions import GoogleAPIError
 from anthropic import Anthropic
 from openai import OpenAI
 import mimetypes
-import torch
-from transformers import BlipProcessor, BlipForConditionalGeneration
 import streamlit as st
+
+# Try importing PyTorch and related libraries
+TORCH_AVAILABLE = False
+try:
+    import torch
+    import torchvision
+    from transformers import BlipProcessor, BlipForConditionalGeneration
+    TORCH_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: PyTorch or related libraries not available: {str(e)}")
+    print("BLIP models will not be available. Please install required dependencies:")
+    print("pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --extra-index-url https://download.pytorch.org/whl/cpu")
+    print("pip install transformers==4.36.2")
 
 # Pricing constants (if you still track cost)
 PRICE_PER_IMAGE = 0.00025
@@ -23,24 +34,60 @@ PRICE_PER_OUTPUT_TOKEN = 0.00000105
 MAX_RETRIES = 3
 INITIAL_BACKOFF_SECONDS = 15
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def load_blip_models():
     """Load and cache BLIP models."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Loading BLIP models on {device}...")
-    
-    models = {
-        "BLIP-Base": {
-            "processor": BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base", use_fast=True),
-            "model": BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base").to(device).eval(),
-        },
-        "BLIP-Large": {
-            "processor": BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", use_fast=True),
-            "model": BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large").to(device).eval(),
+    if not TORCH_AVAILABLE:
+        return None, None
+        
+    try:
+        # Check CUDA availability
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            print("Using CUDA for BLIP models")
+        else:
+            device = torch.device("cpu")
+            print("Using CPU for BLIP models")
+        
+        print("Loading BLIP models...")
+        
+        # Load base model
+        base_processor = BlipProcessor.from_pretrained(
+            "Salesforce/blip-image-captioning-base",
+            use_fast=True,
+            local_files_only=False
+        )
+        base_model = BlipForConditionalGeneration.from_pretrained(
+            "Salesforce/blip-image-captioning-base",
+            local_files_only=False
+        ).to(device).eval()
+        
+        # Load large model
+        large_processor = BlipProcessor.from_pretrained(
+            "Salesforce/blip-image-captioning-large",
+            use_fast=True,
+            local_files_only=False
+        )
+        large_model = BlipForConditionalGeneration.from_pretrained(
+            "Salesforce/blip-image-captioning-large",
+            local_files_only=False
+        ).to(device).eval()
+        
+        models = {
+            "BLIP-Base": {
+                "processor": base_processor,
+                "model": base_model,
+            },
+            "BLIP-Large": {
+                "processor": large_processor,
+                "model": large_model,
+            }
         }
-    }
-    print("BLIP models loaded successfully!")
-    return models, device
+        print("BLIP models loaded successfully!")
+        return models, device
+    except Exception as e:
+        print(f"Error loading BLIP models: {str(e)}")
+        return None, None
 
 class CaptionGenerator:
     def __init__(self, 
@@ -84,7 +131,12 @@ class CaptionGenerator:
             self.openai_client = None
 
         # Initialize BLIP models using cached loader
-        self.blip_models, self.device = load_blip_models()
+        if TORCH_AVAILABLE:
+            with st.spinner("Loading BLIP models..."):
+                self.blip_models, self.device = load_blip_models()
+        else:
+            self.blip_models = None
+            self.device = None
 
     def _retry_generate(self, img: PIL_Image.Image, prompt: str) -> Dict:
         retries = 0
@@ -201,6 +253,9 @@ class CaptionGenerator:
 
     def generate_blip_caption(self, image_path: str, model_name: str = "BLIP-Base") -> str:
         """Generate caption using BLIP model."""
+        if not TORCH_AVAILABLE or not self.blip_models:
+            return "BLIP models not available. Please install required dependencies."
+            
         if model_name not in self.blip_models:
             return f"BLIP model {model_name} not found"
             
@@ -238,8 +293,9 @@ class CaptionGenerator:
         if self.openai_client:
             captions["GPT-4"] = self.generate_gpt4_caption(image_path, prompt)
             
-        # Add BLIP captions
-        captions["BLIP-Base"] = self.generate_blip_caption(image_path, "BLIP-Base")
-        captions["BLIP-Large"] = self.generate_blip_caption(image_path, "BLIP-Large")
+        # Add BLIP captions if available
+        if TORCH_AVAILABLE and self.blip_models:
+            captions["BLIP-Base"] = self.generate_blip_caption(image_path, "BLIP-Base")
+            captions["BLIP-Large"] = self.generate_blip_caption(image_path, "BLIP-Large")
             
         return captions

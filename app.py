@@ -285,7 +285,12 @@ def main():
     st.write("Upload a video or provide a YouTube URL to automatically generate captions for all extracted frames")
 
     # Model selection
-    model_options = ["Gemini", "Claude", "GPT-4", "BLIP-Base", "BLIP-Large"]
+    # Get available models
+    model_options = ["Gemini", "Claude", "GPT-4"]
+    
+    # Add BLIP models if available
+    if caption_generator.blip_models:
+        model_options.extend(["BLIP-Base", "BLIP-Large"])
     
     selected_models = st.multiselect(
         "Choose AI Models",
