@@ -3,7 +3,6 @@ import os
 import tempfile
 from video_utils import extract_frames, get_video_info
 from caption_generator import CaptionGenerator
-from youtube_utils import download_youtube_video, extract_frames_from_youtube_stream, get_youtube_video_info
 import shutil
 from PIL import Image as PIL_Image
 import json
