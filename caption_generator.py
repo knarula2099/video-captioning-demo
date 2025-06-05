@@ -22,8 +22,8 @@ try:
 except ImportError as e:
     print(f"Warning: PyTorch or related libraries not available: {str(e)}")
     print("BLIP models will not be available. Please install required dependencies:")
-    print("pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --extra-index-url https://download.pytorch.org/whl/cpu")
-    print("pip install transformers==4.36.2")
+    print("pip install torch>=2.7.1 torchvision>=0.18.1 torchaudio>=2.7.1 --extra-index-url https://download.pytorch.org/whl/cpu")
+    print("pip install transformers>=4.38.0")
 
 # Pricing constants (if you still track cost)
 PRICE_PER_IMAGE = 0.00025
