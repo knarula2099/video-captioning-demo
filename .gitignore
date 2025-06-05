@@ -2,3 +2,4 @@ frames/
 exports/
 downloads/
 __pycache__/
+.env

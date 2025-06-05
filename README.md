@@ -21,12 +21,25 @@ This Streamlit application allows you to upload videos or download YouTube video
    ```bash
    pip install -r requirements.txt
    ```
-3. Create a `.env` file in the project root with your API keys:
+3. Configure API keys using one of these methods:
+
+   a. Using a `.env` file (recommended for development):
+   Create a `.env` file in the project root with your API keys:
    ```
    OPENAI_API_KEY=your_openai_api_key
    ANTHROPIC_API_KEY=your_anthropic_api_key
    GOOGLE_API_KEY=your_google_api_key
    ```
+
+   b. Using environment variables (recommended for production):
+   Set the environment variables in your terminal:
+   ```bash
+   export OPENAI_API_KEY=your_openai_api_key
+   export ANTHROPIC_API_KEY=your_anthropic_api_key
+   export GOOGLE_API_KEY=your_google_api_key
+   ```
+
+   Note: Environment variables take precedence over values in the `.env` file.
 
 ## Usage
 
@@ -58,4 +71,5 @@ This Streamlit application allows you to upload videos or download YouTube video
 - The app uses temporary files and directories for processing, which are automatically cleaned up
 - API calls may incur costs depending on your usage and the providers' pricing
 - Frame extraction interval can be adjusted to balance between detail and processing time
+- Environment variables can be set either through a `.env` file or directly in the terminal
 - YouTube downloads are saved temporarily and will be deleted when you clear the video or close the app 

@@ -3,7 +3,8 @@ import time
 import random
 import re
 import base64
-from typing import Dict, Optional
+import asyncio
+from typing import Dict, Optional, List, Tuple
 from PIL import Image as PIL_Image
 import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPIError
@@ -11,6 +12,8 @@ from anthropic import Anthropic
 from openai import OpenAI
 import mimetypes
 import streamlit as st
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 # Try importing PyTorch and related libraries
 TORCH_AVAILABLE = False
@@ -94,14 +97,20 @@ class CaptionGenerator:
                  google_api_key: Optional[str] = None,
                  anthropic_api_key: Optional[str] = None,
                  openai_api_key: Optional[str] = None,
-                 default_prompt: Optional[str] = None):
+                 default_prompt: Optional[str] = None,
+                 max_workers: int = 5):
         """
         Initialize caption generator with support for multiple models.
+        
+        Args:
+            max_workers: Maximum number of concurrent workers for batch processing
         """
         self.default_prompt = default_prompt or (
             "Describe this image in one concise sentence (present simple). "
             "Use two sentences only if truly needed (<10% of cases)."
         )
+        self.max_workers = max_workers
+        self.executor = ThreadPoolExecutor(max_workers=max_workers)
         
         # Initialize Gemini
         if google_api_key:
@@ -162,20 +171,24 @@ class CaptionGenerator:
 
         raise last_exc
 
-    def generate_gemini_caption(self, image_path: str, prompt: Optional[str] = None) -> str:
-        """Generate caption using Gemini."""
+    async def generate_gemini_caption_async(self, image_path: str, prompt: Optional[str] = None) -> str:
+        """Generate caption using Gemini asynchronously."""
         if not self.gemini_model:
             return "Gemini API key not configured"
             
         try:
             img = PIL_Image.open(image_path).convert("RGB")
-            response = self.gemini_model.generate_content([prompt or self.default_prompt, img])
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                self.executor,
+                lambda: self.gemini_model.generate_content([prompt or self.default_prompt, img])
+            )
             return response.text.strip()
         except Exception as e:
             return f"Gemini Error: {str(e)}"
 
-    def generate_claude_caption(self, image_path: str, prompt: Optional[str] = None) -> str:
-        """Generate caption using Claude."""
+    async def generate_claude_caption_async(self, image_path: str, prompt: Optional[str] = None) -> str:
+        """Generate caption using Claude asynchronously."""
         if not self.claude_client:
             return "Claude API key not configured"
             
@@ -183,34 +196,28 @@ class CaptionGenerator:
             with open(image_path, "rb") as f:
                 image_data = base64.b64encode(f.read()).decode('utf-8')
             
-            # Detect image format
             mime_type, _ = mimetypes.guess_type(image_path)
             if not mime_type or not mime_type.startswith('image/'):
-                # Fallback based on file extension
                 ext = os.path.splitext(image_path)[1].lower()
-                if ext == '.png':
-                    mime_type = 'image/png'
-                elif ext in ['.jpg', '.jpeg']:
-                    mime_type = 'image/jpeg'
-                elif ext == '.webp':
-                    mime_type = 'image/webp'
-                elif ext == '.gif':
-                    mime_type = 'image/gif'
-                else:
-                    mime_type = 'image/jpeg'  # final fallback
-                
-            message = self.claude_client.messages.create(
-                model="claude-3-5-sonnet-20240620",  # Fixed model name
-                max_tokens=150,
-                temperature=0.4,
-                messages=[
-                    {
+                mime_type = {
+                    '.png': 'image/png',
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.webp': 'image/webp',
+                    '.gif': 'image/gif'
+                }.get(ext, 'image/jpeg')
+            
+            loop = asyncio.get_event_loop()
+            message = await loop.run_in_executor(
+                self.executor,
+                lambda: self.claude_client.messages.create(
+                    model="claude-3-5-sonnet-20240620",
+                    max_tokens=150,
+                    temperature=0.4,
+                    messages=[{
                         "role": "user",
                         "content": [
-                            {
-                                "type": "text",
-                                "text": prompt or self.default_prompt
-                            },
+                            {"type": "text", "text": prompt or self.default_prompt},
                             {
                                 "type": "image",
                                 "source": {
@@ -220,39 +227,43 @@ class CaptionGenerator:
                                 }
                             }
                         ]
-                    }
-                ]
+                    }]
+                )
             )
             return message.content[0].text.strip()
         except Exception as e:
             return f"Claude Error: {str(e)}"
 
-    def generate_gpt4_caption(self, image_path: str, prompt: Optional[str] = None) -> str:
-        """Generate caption using GPT-4 Vision."""
+    async def generate_gpt4_caption_async(self, image_path: str, prompt: Optional[str] = None) -> str:
+        """Generate caption using GPT-4 Vision asynchronously."""
         if not self.openai_client:
             return "GPT-4 API key not configured"
             
         try:
             with open(image_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode('utf-8')  # Fixed: added base64 encoding
-                
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini-2024-07-18",
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt or self.default_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
-                    ]
-                }],
-                max_tokens=150
+                image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                self.executor,
+                lambda: self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini-2024-07-18",
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt or self.default_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
+                        ]
+                    }],
+                    max_tokens=150
+                )
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
             return f"GPT-4 Error: {str(e)}"
 
-    def generate_blip_caption(self, image_path: str, model_name: str = "BLIP-Base") -> str:
-        """Generate caption using BLIP model."""
+    async def generate_blip_caption_async(self, image_path: str, model_name: str = "BLIP-Base") -> str:
+        """Generate caption using BLIP model asynchronously."""
         if not TORCH_AVAILABLE or not self.blip_models:
             return "BLIP models not available. Please install required dependencies."
             
@@ -269,7 +280,12 @@ class CaptionGenerator:
                 "If the image includes text on the screen, then the description should include the full text, even if it is 2 sentences or more sentences."
             )
             
-            inputs = cfg["processor"](images=img, text=prompt, return_tensors="pt").to(self.device)
+            loop = asyncio.get_event_loop()
+            inputs = await loop.run_in_executor(
+                self.executor,
+                lambda: cfg["processor"](images=img, text=prompt, return_tensors="pt").to(self.device)
+            )
+            
             with torch.no_grad():
                 out_ids = cfg["model"].generate(
                     pixel_values=inputs.pixel_values,
@@ -282,20 +298,58 @@ class CaptionGenerator:
         except Exception as e:
             return f"BLIP Error: {str(e)}"
 
-    def generate_all_captions(self, image_path: str, prompt: Optional[str] = None) -> Dict[str, str]:
-        """Generate captions using all available models."""
-        captions = {}
+    async def generate_all_captions_async(self, image_path: str, prompt: Optional[str] = None) -> Dict[str, str]:
+        """Generate captions using all available models asynchronously."""
+        tasks = []
         
         if self.gemini_model:
-            captions["Gemini"] = self.generate_gemini_caption(image_path, prompt)
+            tasks.append(self.generate_gemini_caption_async(image_path, prompt))
         if self.claude_client:
-            captions["Claude"] = self.generate_claude_caption(image_path, prompt)
+            tasks.append(self.generate_claude_caption_async(image_path, prompt))
         if self.openai_client:
-            captions["GPT-4"] = self.generate_gpt4_caption(image_path, prompt)
-            
-        # Add BLIP captions if available
+            tasks.append(self.generate_gpt4_caption_async(image_path, prompt))
         if TORCH_AVAILABLE and self.blip_models:
-            captions["BLIP-Base"] = self.generate_blip_caption(image_path, "BLIP-Base")
-            captions["BLIP-Large"] = self.generate_blip_caption(image_path, "BLIP-Large")
+            tasks.append(self.generate_blip_caption_async(image_path, "BLIP-Base"))
+            tasks.append(self.generate_blip_caption_async(image_path, "BLIP-Large"))
+        
+        results = await asyncio.gather(*tasks)
+        
+        captions = {}
+        model_names = []
+        if self.gemini_model:
+            model_names.append("Gemini")
+        if self.claude_client:
+            model_names.append("Claude")
+        if self.openai_client:
+            model_names.append("GPT-4")
+        if TORCH_AVAILABLE and self.blip_models:
+            model_names.extend(["BLIP-Base", "BLIP-Large"])
+            
+        for model_name, result in zip(model_names, results):
+            captions[model_name] = result
             
         return captions
+
+    async def process_batch_async(self, image_paths: List[str], prompt: Optional[str] = None) -> List[Dict[str, str]]:
+        """Process a batch of images asynchronously."""
+        tasks = [self.generate_all_captions_async(path, prompt) for path in image_paths]
+        return await asyncio.gather(*tasks)
+
+    def process_batch(self, image_paths: List[str], prompt: Optional[str] = None) -> List[Dict[str, str]]:
+        """Process a batch of images using the event loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.process_batch_async(image_paths, prompt))
+        finally:
+            loop.close()
+
+    # Keep the original synchronous methods for backward compatibility
+    def generate_all_captions(self, image_path: str, prompt: Optional[str] = None) -> Dict[str, str]:
+        """Generate captions using all available models (synchronous version)."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.generate_all_captions_async(image_path, prompt))
+        finally:
+            loop.close()

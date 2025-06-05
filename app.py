@@ -9,6 +9,17 @@ import json
 import pandas as pd
 from datetime import datetime
 import base64
+import asyncio
+from typing import List, Dict
+from dotenv import load_dotenv
+
+# Try to load from .env file, but don't override existing environment variables
+load_dotenv(override=False)
+
+# Get API keys from environment variables (either from .env or terminal)
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 # Set page config
 st.set_page_config(
@@ -30,11 +41,6 @@ if 'custom_prompt' not in st.session_state:
     st.session_state.custom_prompt = None
 if 'models_initialized' not in st.session_state:
     st.session_state.models_initialized = False
-
-# Get API keys from environment variables
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 # Initialize caption generator with loading indicator
 if not st.session_state.models_initialized:
@@ -359,30 +365,36 @@ def main():
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    captions_list = []
+                    # Process frames in batches
+                    batch_size = 5  # Adjust based on your needs
                     total_frames = len(frame_paths)
+                    captions_list = []
                     
-                    for idx, fp in enumerate(frame_paths):
-                        # Update progress bar and status
-                        progress = (idx + 1) / total_frames
-                        progress_bar.progress(progress)
-                        status_text.text(f"Processing frame {idx + 1} of {total_frames}")
+                    for i in range(0, total_frames, batch_size):
+                        batch = frame_paths[i:i + batch_size]
+                        batch_captions = caption_generator.process_batch(batch, st.session_state.custom_prompt)
                         
-                        captions = caption_generator.generate_all_captions(fp)
                         # Filter captions based on selected models
-                        filtered_captions = {
-                            model: caption 
-                            for model, caption in captions.items() 
-                            if model in st.session_state.selected_models
-                        }
-                        captions_list.append(filtered_captions)
+                        filtered_batch = [
+                            {
+                                model: caption 
+                                for model, caption in captions.items() 
+                                if model in st.session_state.selected_models
+                            }
+                            for captions in batch_captions
+                        ]
+                        captions_list.extend(filtered_batch)
+                        
+                        # Update progress
+                        progress = min((i + len(batch)) / total_frames, 1.0)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Processing frames {i + 1} to {min(i + batch_size, total_frames)} of {total_frames}")
                     
                     # Complete the progress bar
                     progress_bar.progress(1.0)
                     status_text.text(f"✅ Completed! Generated captions for {total_frames} frames")
                     
                     st.session_state.captions = captions_list
-
                     st.success(f"Extracted {len(frame_paths)} frames and generated captions!")
 
         # Display all frames with captions

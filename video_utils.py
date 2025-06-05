@@ -21,7 +21,7 @@ def extract_frames(video_path: str, output_dir: str = "frames", frame_interval: 
     # ----------------------------------------------------------------------------
     # You can tune HIST_THRESHOLD to be more or less sensitive.
     # Lower → more frames get saved. Higher → fewer frames.
-    HIST_THRESHOLD = 0.8
+    HIST_THRESHOLD = 0.9
     # ----------------------------------------------------------------------------
 
     # 1) Create (or clear) the output directory
