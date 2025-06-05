@@ -353,12 +353,18 @@ def main():
             frame_interval = st.slider("Extract frame every N frames", 1, 60, 30)
         with col2:
             if st.button("Extract Frames and Generate Captions"):
-                with st.spinner("Extracting frames..."):
+                try:
                     # Extract frames from local file
                     frame_paths = extract_frames(st.session_state.video_path, "frames", frame_interval)
+                    
+                    if not frame_paths:
+                        st.error("No frames were extracted. Please try a different video or adjust the frame interval.")
+                        return
+                        
                     st.session_state.processed_frames = frame_paths
+                    st.success(f"Successfully extracted {len(frame_paths)} frames!")
 
-                if frame_paths:
+                    # Generate captions
                     st.write("Generating captions for all frames...")
                     
                     # Create progress bar
@@ -395,7 +401,12 @@ def main():
                     status_text.text(f"✅ Completed! Generated captions for {total_frames} frames")
                     
                     st.session_state.captions = captions_list
-                    st.success(f"Extracted {len(frame_paths)} frames and generated captions!")
+                    st.success(f"Generated captions for {len(frame_paths)} frames!")
+                    
+                except Exception as e:
+                    st.error(f"An error occurred during processing: {str(e)}")
+                    # Clean up any partial results
+                    cleanup_files()
 
         # Display all frames with captions
         if st.session_state.processed_frames and st.session_state.captions:
